@@ -34,12 +34,15 @@ x;                                                                              
 
 namespace MaliSDK
 {
-    void Shader::processShader(GLuint *shader, const char *filename, GLint shaderType)
+    void Shader::processShader(GLuint *shader, const char *filename, GLint shaderType, AAssetManager* manager)
     {
         const char *strings[1] = { NULL };
         /* Create shader and load into GL. */
         *shader = GL_CHECK(glCreateShader(shaderType));
-        strings[0] = loadShader(filename);
+        if(manager == nullptr)
+            strings[0] = loadShader(filename);
+        else
+            strings[0] = loadShaderFromAsset(filename, manager);
         GL_CHECK(glShaderSource(*shader, 1, strings, NULL));
         /* Clean up shader source. */
         free((void *)(strings[0]));
@@ -99,6 +102,35 @@ namespace MaliSDK
         }
         shader[length] = '\0';
         fclose(file);
+        return shader;
+    }
+
+    char* Shader::loadShaderFromAsset(const char *filename, AAssetManager* manager)
+    {
+        //FILE *file = fopen(filename, "rb");
+        AAsset* asset =  AAssetManager_open(manager, filename, AASSET_MODE_STREAMING);
+        if(asset == NULL)
+        {
+            LOGE("Cannot read asset '%s'\n", filename);
+            exit(1);
+        }
+        /* Record the size of the file for memory allocation. */
+        long length = AAsset_getLength(asset);
+        char *shader = (char *)calloc(length + 1, sizeof(char));
+        if(shader == NULL)
+        {
+            LOGE("Out of memory at %s:%i\n", __FILE__, __LINE__);
+            exit(1);
+        }
+        /* Read in the file */
+        size_t numberOfBytesRead = AAsset_read(asset, shader, length);
+        if (numberOfBytesRead != length)
+        {
+            LOGE("Error reading %s (read %zu of %ld)", filename, numberOfBytesRead, length);
+            exit(1);
+        }
+        shader[length] = '\0';
+        AAsset_close(asset);
         return shader;
     }
 }

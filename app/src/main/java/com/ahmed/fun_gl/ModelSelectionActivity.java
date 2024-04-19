@@ -1,36 +1,25 @@
 package com.ahmed.fun_gl;
 
-import static android.provider.MediaStore.createWriteRequest;
-
-import android.Manifest;
 import android.app.Activity;
-import android.app.PendingIntent;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.IntentSender;
-import android.content.pm.PackageManager;
+import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Intent;
-import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
 import androidx.navigation.ui.AppBarConfiguration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -40,16 +29,12 @@ import com.ahmed.fun_gl.databinding.ActivityModelSelectionBinding;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Iterator;
 
 public class ModelSelectionActivity extends AppCompatActivity {
 
@@ -207,6 +192,8 @@ public class ModelSelectionActivity extends AppCompatActivity {
                 openFile();
             }
         });
+
+        NativeLib.importAssets(getAssets());
     }
 
 //    @Override
@@ -215,4 +202,5 @@ public class ModelSelectionActivity extends AppCompatActivity {
 //        return NavigationUI.navigateUp(navController, appBarConfiguration)
 //                || super.onSupportNavigateUp();
 //    }
+
 }

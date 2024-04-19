@@ -17,6 +17,8 @@ public class NativeLib {
     public static native void init(int width, int height);
     public static native void step();
 
+    public static native void importAssets(Object object);
+
     public static native void parse(String fileName);
 
     public static native void parseInit();

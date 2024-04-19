@@ -24,6 +24,8 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <android/log.h>
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
 
 #define LOG_TAG "libNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -46,8 +48,9 @@ namespace MaliSDK
     {
     private:
         static char *loadShader(const char *filename);
+        static char *loadShaderFromAsset(const char *filename, AAssetManager* manager);
     public:
-        static void processShader(GLuint *shader, const char *filename, GLint shaderType);
+        static void processShader(GLuint *shader, const char *filename, GLint shaderType, AAssetManager* manager);
     };
 }
 #endif /* SHADER_H */

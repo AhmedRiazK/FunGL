@@ -106,6 +106,8 @@ float projectionMatrix[16];
 float modelViewMatrix[16];
 float angle = 0;
 
+AAssetManager* asset_manager = nullptr;
+
 extern float* get_indices();
 extern unsigned short* get_vertices();
 
@@ -113,13 +115,19 @@ extern unsigned short* get_vertices();
 bool setupGraphics(int width, int height)
 {
     /*Shader path*/
+#if 0
     const std::string vShaderFileName = resourceDirectory+vertexShaderFileName;
     const std::string fShaderFileName = resourceDirectory+fragmentShaderFileName;
-
+#else
+    const std::string vShaderFileName = "glsl/"+vertexShaderFileName;
+    const std::string fShaderFileName = "glsl/"+fragmentShaderFileName;
+#endif
     /*Process Shader*/
     GLuint vShaderID, fShaderID;
-    MaliSDK::Shader::processShader(&vShaderID, vShaderFileName.c_str(), GL_VERTEX_SHADER);
-    MaliSDK::Shader::processShader(&fShaderID, fShaderFileName.c_str(), GL_FRAGMENT_SHADER);
+    MaliSDK::Shader::processShader(&vShaderID, vShaderFileName.c_str(), \
+    GL_VERTEX_SHADER, asset_manager);
+    MaliSDK::Shader::processShader(&fShaderID, fShaderFileName.c_str(), \
+    GL_FRAGMENT_SHADER, asset_manager);
 
     /*Create program*/
     meshProgram = GL_CHECK(glCreateProgram());
@@ -192,5 +200,10 @@ extern "C"
     JNIEXPORT void JNICALL
     Java_com_ahmed_fun_1gl_NativeLib_step(JNIEnv *env, jclass clazz) {
         renderFrame();
+    }
+
+    JNIEXPORT void JNICALL
+    Java_com_ahmed_fun_1gl_NativeLib_importAssets(JNIEnv *env, jclass clazz, jobject object) {
+        asset_manager = AAssetManager_fromJava(env, object);
     }
 }
