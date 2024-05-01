@@ -1,11 +1,13 @@
-#include <jni.h>
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <map>
 #include <string.h>
-#include "shader.h"
+#include <jni.h>
+#include "matrix.h"
+
 
 using namespace std;
 struct face
@@ -29,6 +31,8 @@ struct vert
     float val[4];
 };
 
+ObjectList* objList;
+
 struct obj_info
 {
     int id;
@@ -48,11 +52,12 @@ vector<face*> faces;
 vector<vert*> vertices;
 map<std::pair<int , struct obj_info*>, vector<face*>> object_list;
 
-vector<vert*> vertices_obj;
-vector<vert*> vertices_nrm_obj;
-vector<vert*> vertices_txt_obj;
+vector<vert> vertices_obj;
+vector<vert> vertices_nrm_obj;
+vector<vert> vertices_txt_obj;
 int max_faces=0;
 int init_dim_x, init_dim_y, init_dim_z;
+int stride=0;
 
 size_t found;
 int object_index=-1;
@@ -63,6 +68,58 @@ std::string obj_name;
 
 static vector<float> vertices_group;
 static vector<unsigned short> indices;
+
+float scene_volume_x_min=0;
+float scene_volume_x_max=0;
+float scene_volume_y_min=0;
+float scene_volume_y_max=0;
+float scene_volume_z_min=0;
+float scene_volume_z_max=0;
+
+float get_scene_width()
+{
+    return (scene_volume_x_max - scene_volume_x_min);
+}
+
+float get_scene_height()
+{
+    return (scene_volume_y_max - scene_volume_y_min);
+}
+
+float get_scene_depth()
+{
+    return (scene_volume_z_max - scene_volume_z_min);
+}
+
+int get_indices_size()
+{
+    return indices.size();
+}
+
+unsigned short* get_indices()
+{
+    return indices.data();
+}
+
+int get_stride_size()
+{
+    return stride;
+}
+
+int get_vertices_size()
+{
+    return vertices_group.size();
+}
+
+float* get_vertices()
+{
+    return vertices_group.data();
+}
+
+ObjectList* get_objects_info()
+{
+    return objList;
+}
 
 int get_dimension(float val, int axis)
 {
@@ -132,34 +189,381 @@ int get_dimension(float val, int axis)
     return 0;
 }
 
+
+void set_scene_volume_left_pos(float pos)
+{
+    scene_volume_x_min = pos;
+}
+void set_scene_volume_right_pos(float pos)
+{
+    scene_volume_x_max = pos;
+}
+void set_scene_volume_top_pos(float pos)
+{
+    scene_volume_y_max = pos;
+}
+void set_scene_volume_bottom_pos(float pos)
+{
+    scene_volume_y_min = pos;
+}
+void set_scene_volume_front_pos(float pos)
+{
+    scene_volume_z_min = pos;
+}
+void set_scene_volume_back_pos(float pos)
+{
+    scene_volume_z_max = pos;
+}
+void set_scene_bound_volume(float left, float right, float bottom, float top, float front, float back)
+{
+    set_scene_volume_left_pos(left);
+    set_scene_volume_right_pos(right);
+    set_scene_volume_bottom_pos(bottom);
+    set_scene_volume_top_pos(top);
+    set_scene_volume_front_pos(front);
+    set_scene_volume_back_pos(back);
+}
+
+void update_scene_volume(float left, float right, float bottom, float top, float front, float back)
+{
+    if(left < scene_volume_x_min)
+    {
+        scene_volume_x_min = left;
+    }
+    if(right > scene_volume_x_max)
+    {
+        scene_volume_x_max = right;
+    }
+
+    if(bottom < scene_volume_y_min)
+    {
+        scene_volume_y_min = bottom;
+    }
+    if(top > scene_volume_y_max)
+    {
+        scene_volume_y_max = top;
+    }
+
+    if(front < scene_volume_z_min)
+    {
+        scene_volume_z_min = front;
+    }
+    if(back > scene_volume_z_max)
+    {
+        scene_volume_z_max = back;
+    }
+}
+
+void print_to_obj_c()
+{
+    ofstream out;
+    vert* vertices;
+    int n=0, tmp=0;
+    int offset=0;
+    int triangles=0;
+
+
+    //std::cout << vertices_obj.size() << endl;
+    out.open("obj_info.c");
+
+    if(!out.is_open())
+    {
+        return;
+    }
+    out << "#include <stddef.h>" << endl;
+    for(auto pair : object_list)
+    {
+        tmp=0;
+        out << "/*** Obj - "<< pair.first.second->name << "[ " <<pair.first.first << " ]" <<" ***/" << endl;
+        out << "/* x [" << pair.first.second->x_min << " / " << pair.first.second->x_max << "], y [" << pair.first.second->y_min << " / " << pair.first.second->y_max <<  "] z [" << pair.first.second->z_min << " / " << pair.first.second->z_max << "] */"<< endl;
+        out << "/* w [" << pair.first.second->x_max - pair.first.second->x_min << "], H [" << pair.first.second->y_max - pair.first.second->y_min << "] D [" << pair.first.second->z_max - pair.first.second->z_min << "] */"<< endl;
+        out << "/* cx [" << ((pair.first.second->x_max - pair.first.second->x_min)/2)+pair.first.second->x_min << "], cy [" << ((pair.first.second->y_max - pair.first.second->y_min)/2)+pair.first.second->y_min <<  "], cz [" << ((pair.first.second->z_max - pair.first.second->z_min)/2)+pair.first.second->z_min << "] */"<< endl;
+        out << "static double vertices_"<<pair.first.first+1<<"[]={" << endl;
+        if(pair.first.first)
+        {
+            update_scene_volume( pair.first.second->x_min \
+                                  , pair.first.second->x_max \
+                                  , pair.first.second->y_min \
+                                  , pair.first.second->y_max \
+                                  , pair.first.second->z_min \
+                                  , pair.first.second->z_max );
+        }
+        else
+        {
+            set_scene_bound_volume( pair.first.second->x_min \
+                                    , pair.first.second->x_max \
+                                    , pair.first.second->y_min \
+                                    , pair.first.second->y_max \
+                                    , pair.first.second->z_min \
+                                    , pair.first.second->z_max );
+        }
+        for(auto face : pair.second)
+        {
+            /*Get each vertex per face*/
+            for(int index=0; index < face->vert_size; index++)
+            {
+                if(vertices_obj.size())
+                {
+                    ++triangles;
+                    vertices = &vertices_obj.at(face->vert_[index]-1);
+                    out << fixed << setprecision(4) << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1.0," << endl;
+                }
+#if 1
+                if(vertices_txt_obj.size())
+                {
+                    if(face->vert_t[0]==-1)
+                    {
+                        out << "0.0f,0.0f,0.0f,"<< endl;
+                    }
+                    else
+                    {
+                        vertices = &vertices_txt_obj.at(face->vert_t[index]-1);
+                        out << fixed << setprecision(4) << vertices->val[0] << "f," << vertices->val[1] << "f," << "0.0f," << endl;
+                    }
+                }
+
+                if(vertices_nrm_obj.size())
+                {
+                    if(face->vert_n[0]==-1)
+                    {
+                        out << "0.0f,0.0f,0.0f,"<< endl;
+                    }
+                    else
+                    {
+                        vertices = &vertices_nrm_obj.at(face->vert_n[index]-1);
+                        out << fixed << setprecision(4) << vertices->val[0] << "f," << vertices->val[1] << "f," << vertices->val[2] << "f," << endl;
+                    }
+                }
+
+                {
+                    /*Add diffuse color*/
+                    out << "1.0f,0.0f,0.0f,"<< endl;
+                }
+#endif
+            }
+        }
+        out << "};" << endl;
+        // std::cout << triangles << endl;
+
+
+        out << "static unsigned short indices_"<<pair.first.first+1<<"[]={" << endl;
+        triangles=0;
+        for(auto face : pair.second)
+        {
+            n=1;
+            for(int index = 2; index <  face->vert_size; index++)
+            {
+                ++triangles;
+                //out << face->vert_[tmp]-1-offset <<", " << face->vert_[tmp+n]-1-offset << ", " << face->vert_[tmp+n+1]-1-offset << ", ";
+                //out << tmp <<", " << tmp+n << ", " << tmp+n+1 << ", ";
+                out << tmp <<", " << tmp+(index-1) << ", " << tmp+index << ", ";
+                n++;
+            }
+            tmp += face->vert_size;
+            out << endl;
+        }
+        out << "};" << endl;
+
+        out << "/*** End of Obj - "<< pair.first.second->name << "[ " <<pair.first.first << " ] " << \
+                "[ TRIANGLES : "<< triangles << " ]" <<" ***/" << endl;
+        // printf("offset: %d\r\n", offset);
+    }
+
+    out << "static double* vertices_info[]={" << endl;
+    for(auto pair : object_list)
+    {
+        out << "\tvertices_"<<pair.first.first+1<<","<<endl;
+    }
+    out << "};" << endl;
+
+    out << "static unsigned short* indices_info[]={" << endl;
+    for(auto pair : object_list)
+    {
+        out << "\tindices_"<<pair.first.first+1<<","<<endl;
+    }
+    out << "};" << endl;
+
+    out << "static int indices_count_info[]={" << endl;
+    for(auto pair : object_list)
+    {
+        out << "\tsizeof(indices_"<<pair.first.first+1<<")/sizeof(unsigned short),"<<endl;
+    }
+    out << "};" << endl;
+
+    out << "int get_obj_num() \n{\n\treturn "<<object_list.size()<<";\n}\n";
+    out << "double* get_vertices(int index) \n{\n\treturn vertices_info[index];\n}\n";
+    out << "unsigned short* get_indices(int index) \n{\n\treturn indices_info[index];\n}\n";
+    out << "int get_indices_count(int index) \n{\n\treturn indices_count_info[index];\n}\n";
+    out << "int get_stride() \n{\n\treturn "<< stride <<";\n}\n";
+    out << "float get_scene_width() \n{\n\treturn "<< scene_volume_x_max - scene_volume_x_min <<";\n}\n";
+    out << "float get_scene_height() \n{\n\treturn "<< scene_volume_y_max - scene_volume_y_min <<";\n}\n";
+    out << "float get_scene_depth() \n{\n\treturn "<< scene_volume_z_max - scene_volume_z_min <<";\n}\n";
+    // out << "int get_vert_size()\n{\nreturn sizeof(vert)/sizeof(vert[0]);\n}" << endl;
+    // out << "float * get_vert()\n{\nreturn vert;\n}" << endl;
+    out.close();
+}
+
+void update_indices() {
+    int n=0, tmp=0;
+    int offset=0;
+    int triangles=0;
+    indices.clear();
+    for (auto pair: object_list){
+        for (auto face: pair.second) {
+            n = 1;
+            for (int index = 2; index < face->vert_size; index++) {
+                triangles++;
+                //out << face->vert_[tmp]-1-offset <<", " << face->vert_[tmp+n]-1-offset << ", " << face->vert_[tmp+n+1]-1-offset << ", ";
+                //out << tmp <<", " << tmp+n << ", " << tmp+n+1 << ", ";
+                indices.push_back(tmp);
+                indices.push_back(tmp + (index - 1));
+                indices.push_back(tmp + index);
+                n++;
+            }
+            tmp += face->vert_size;
+        }
+    }
+    // LOGE("TOTAL triangles: %d", triangles);
+    // LOGE("TOTAL indices: %d", get_indices_size());
+    // LOGE("TOTAL vert: %d", get_vertices_size());
+    // LOGE("TOTAL indices last: %d", indices.at(indices.size()-1));
+    // LOGE("TOTAL stride: %d", get_stride_size());
+}
+
+void update_vertices()
+{
+    int n=0, tmp=0;
+    int offset=0;
+    int triangles=0;
+    indices.clear();
+    vertices_group.clear();
+
+    vert* ptr_vertices = nullptr;
+    for(auto pair : object_list) {
+        if(pair.first.first)
+        {
+            update_scene_volume( pair.first.second->x_min \
+                                  , pair.first.second->x_max \
+                                  , pair.first.second->y_min \
+                                  , pair.first.second->y_max \
+                                  , pair.first.second->z_min \
+                                  , pair.first.second->z_max );
+        }
+        else
+        {
+            set_scene_bound_volume( pair.first.second->x_min \
+                                    , pair.first.second->x_max \
+                                    , pair.first.second->y_min \
+                                    , pair.first.second->y_max \
+                                    , pair.first.second->z_min \
+                                    , pair.first.second->z_max );
+        }
+        for (auto face: pair.second) {
+            /*Get each vertex per face*/
+            for (int index = 0; index < face->vert_size; index++) {
+                if (vertices_obj.size()) {
+                    ptr_vertices = &vertices_obj.at(face->vert_[index] - 1);
+                    vertices_group.push_back(ptr_vertices->val[0]);
+                    vertices_group.push_back(ptr_vertices->val[1]);
+                    vertices_group.push_back(ptr_vertices->val[2]);
+                    vertices_group.push_back(1.0);
+                }
+
+                if (vertices_txt_obj.size()) {
+                    if (face->vert_t[0] == -1) {
+                        vertices_group.push_back(0);
+                        vertices_group.push_back(0);
+                        vertices_group.push_back(0);
+                    } else {
+                        ptr_vertices = &vertices_txt_obj.at(face->vert_t[index] - 1);
+                        vertices_group.push_back(ptr_vertices->val[0]);
+                        vertices_group.push_back(ptr_vertices->val[1]);
+                        vertices_group.push_back(0);
+                    }
+                }
+
+                if (vertices_nrm_obj.size()) {
+                    if (face->vert_n[0] == -1) {
+                        vertices_group.push_back(0);
+                        vertices_group.push_back(0);
+                        vertices_group.push_back(0);
+                    } else {
+                        ptr_vertices = &vertices_nrm_obj.at(face->vert_n[index] - 1);
+                        vertices_group.push_back(ptr_vertices->val[0]);
+                        vertices_group.push_back(ptr_vertices->val[1]);
+                        vertices_group.push_back(ptr_vertices->val[2]);
+                    }
+                }
+
+                {
+                    /*Add diffuse color*/
+                    vertices_group.push_back(0);
+                    vertices_group.push_back(1);
+                    vertices_group.push_back(0);
+                }
+            }
+        }
+
+        for (auto face: pair.second) {
+            n = 1;
+            for (int index = 2; index < face->vert_size; index++) {
+                triangles++;
+                //out << face->vert_[tmp]-1-offset <<", " << face->vert_[tmp+n]-1-offset << ", " << face->vert_[tmp+n+1]-1-offset << ", ";
+                //out << tmp <<", " << tmp+n << ", " << tmp+n+1 << ", ";
+                indices.push_back(tmp);
+                indices.push_back(tmp + (index - 1));
+                indices.push_back(tmp + index);
+                n++;
+            }
+            tmp += face->vert_size;
+        }
+
+        ObjectList* temp = new ObjectList();
+
+        temp->obj_data = new ObjectData(pair.first.second->name, vertices_group, indices, \
+                                            vertices_group.size(), indices.size(), get_stride_size());
+
+        temp->obj_data->set_object_boundary(pair.first.second->x_min, pair.first.second->y_min, \
+                                            pair.first.second->z_min, pair.first.second->x_max, \
+                                            pair.first.second->y_max, pair.first.second->z_max);
+        temp->obj_data->set_object_center(
+                ((pair.first.second->x_max - pair.first.second->x_min)/2)+pair.first.second->x_min, \
+                ((pair.first.second->y_max - pair.first.second->y_min)/2)+pair.first.second->y_min, \
+                ((pair.first.second->z_max - pair.first.second->z_min)/2)+pair.first.second->z_min);
+
+        temp->next = nullptr;
+
+        if(objList == nullptr)
+        {
+            objList = temp;
+        }
+        else
+        {
+            ObjectList* lst;
+            lst = objList;
+            while(lst->next)
+            {
+                lst = lst->next;
+            }
+            lst->next = temp;
+        }
+    }
+}
+
 //int parse_vertices(string str_file, string delimeter)
 int parse_vertices(std::string line, string delimiter)
 {
     //stringstream ctx(str_file);
     // std::cout << "Parsing operation started for " << delimeter << std::endl;
-#if 0    
-    size_t found = ctx.find("f");
-    while(found != string::npos)
-    {
-        cout << found << endl;
-        found = ctx.find("f", found+1);
-        for(std::string::iterator it = ctx.)
-        {
-
-        }
-        face *n_face = new face;
-        n_face->a = 
-    }
-#endif
     bool vertices_info_flag = false;
     stringstream temp;
-    vert *n_vert;
+    vert n_vert;
     int vert_index=0;
     //for (string line; getline(ctx, line); )
 
-    n_vert = new vert;
+    //n_vert = new vert;
     vert_index=0;
-    
+
     string::iterator it = line.begin();
 
     while (it != line.end())
@@ -172,7 +576,7 @@ int parse_vertices(std::string line, string delimiter)
                 {
                     get_dimension( std::stof(temp.str()), vert_index);
                 }
-                n_vert->val[vert_index] = std::stof(temp.str());
+                n_vert.val[vert_index] = std::stof(temp.str());
                 // cout << "face index: " << vert_index << "val: " << n_vert->val[vert_index] << endl;
                 temp.str("");
                 temp.clear();
@@ -190,571 +594,31 @@ int parse_vertices(std::string line, string delimiter)
         {
             get_dimension( stof(temp.str()), vert_index);
         }
-        n_vert->val[vert_index] = stof(temp.str());
+        n_vert.val[vert_index] = stof(temp.str());
         // cout << "face index: " << faces_index << "val: " << n_face->val[faces_index] << endl;
         temp.str("");
         temp.clear();
         vert_index++;
     }
 
-    if(n_vert != nullptr)
+    // vertices.push_back(n_vert);
+    if(!delimiter.compare("v"))
     {
-        // vertices.push_back(n_vert);
-        if(!delimiter.compare("v"))
-        {
-            vertices_obj.push_back(n_vert);
-        }
-        else if(!delimiter.compare("vn"))
-        {
-            vertices_nrm_obj.push_back(n_vert);
-        }
-        else if(!delimiter.compare("vt"))
-        {
-            vertices_txt_obj.push_back(n_vert);
-        }
+        vertices_obj.push_back(n_vert);
+    }
+    else if(!delimiter.compare("vn"))
+    {
+        vertices_nrm_obj.push_back(n_vert);
+    }
+    else if(!delimiter.compare("vt"))
+    {
+        vertices_txt_obj.push_back(n_vert);
     }
 
     // vertices.clear();
 
     return 0;
 }
-
-unsigned short* get_indices()
-{
-    return indices.data();
-}
-
-float* get_vertices()
-{
-    return vertices_group.data();
-}
-
-void update_indices() {
-    int n=0, tmp=0;
-    int offset=0;
-    indices.clear();
-    for (auto pair: object_list){
-        for (auto face: pair.second) {
-            n = 1;
-            for (int index = 2; index < face->vert_size; index++) {
-                //out << face->vert_[tmp]-1-offset <<", " << face->vert_[tmp+n]-1-offset << ", " << face->vert_[tmp+n+1]-1-offset << ", ";
-                //out << tmp <<", " << tmp+n << ", " << tmp+n+1 << ", ";
-                indices.push_back(tmp);
-                indices.push_back(tmp + (index - 1));
-                indices.push_back(tmp + index);
-                n++;
-            }
-            tmp += face->vert_size;
-        }
-    }
-}
-
-void update_vertices()
-{
-    vert* ptr_vertices = nullptr;
-    vertices_group.clear();
-    for(auto pair : object_list) {
-        for (auto face: pair.second) {
-            /*Get each vertex per face*/
-            for (int index = 0; index < face->vert_size; index++) {
-                if (vertices_obj.size()) {
-                    ptr_vertices = vertices_obj.at(face->vert_[index] - 1);
-                    vertices_group.push_back(ptr_vertices->val[0]);
-                    vertices_group.push_back(ptr_vertices->val[1]);
-                    vertices_group.push_back(ptr_vertices->val[2]);
-                    vertices_group.push_back(1.0);
-                }
-
-                if (vertices_txt_obj.size()) {
-                    if (face->vert_t[0] == -1) {
-                        vertices_group.push_back(0);
-                        vertices_group.push_back(0);
-                        vertices_group.push_back(0);
-                    } else {
-                        ptr_vertices = vertices_txt_obj.at(face->vert_t[index] - 1);
-                        vertices_group.push_back(ptr_vertices->val[0]);
-                        vertices_group.push_back(ptr_vertices->val[1]);
-                        vertices_group.push_back(0);
-                    }
-                }
-
-                if (vertices_nrm_obj.size()) {
-                    if (face->vert_n[0] == -1) {
-                        vertices_group.push_back(0);
-                        vertices_group.push_back(0);
-                        vertices_group.push_back(0);
-                    } else {
-                        ptr_vertices = vertices_nrm_obj.at(face->vert_n[index] - 1);
-                        vertices_group.push_back(ptr_vertices->val[0]);
-                        vertices_group.push_back(ptr_vertices->val[1]);
-                        vertices_group.push_back(ptr_vertices->val[2]);
-                    }
-                }
-
-                {
-                    /*Add diffuse color*/
-                    vertices_group.push_back(0);
-                    vertices_group.push_back(1);
-                    vertices_group.push_back(0);
-                }
-            }
-        }
-    }
-}
-
-void print_s()
-{
-    ofstream out;
-    vert* vertices;
-    int n=0, tmp=0;
-    int offset=0;
-
-    out.open("obj_info.c");
-
-    if(!out.is_open())
-    {
-        return;
-    }
-    out << "#include <stddef.h>" << endl;
-    for(auto pair : object_list)
-    {
-        tmp=0;
-        out << "/*** Obj - "<< pair.first.second->name << "[ " <<pair.first.first << " ]" <<" ***/" << endl;
-        out << "/* x [" << pair.first.second->x_min << " / " << pair.first.second->x_max << "], y [" << pair.first.second->y_min << " / " << pair.first.second->y_max <<  "] z [" << pair.first.second->z_min << " / " << pair.first.second->z_max << "] */"<< endl;
-        out << "/* w [" << pair.first.second->x_max - pair.first.second->x_min << "], H [" << pair.first.second->y_max - pair.first.second->y_min << "] D [" << pair.first.second->z_max - pair.first.second->z_min << "] */"<< endl;
-        out << "/* cx [" << ((pair.first.second->x_max - pair.first.second->x_min)/2)+pair.first.second->x_min << "], cy [" << ((pair.first.second->y_max - pair.first.second->y_min)/2)+pair.first.second->y_min <<  "], cz [" << ((pair.first.second->z_max - pair.first.second->z_min)/2)+pair.first.second->z_min << "] */"<< endl;
-        out << "static float vertices[]={" << endl;
-        for(auto face : pair.second)
-        {
-            /*Get each vertex per face*/
-            for(int index=0; index < face->vert_size; index++)
-            {
-                if(vertices_obj.size())
-                {
-                    vertices = vertices_obj.at(face->vert_[index]-1);
-                    out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-                }
-
-                if(vertices_txt_obj.size())
-                {
-                    if(face->vert_t[0]==-1)
-                    {
-                        out << "0,0,0,"<< endl;   
-                    }
-                    else
-                    {
-                        vertices = vertices_txt_obj.at(face->vert_t[index]-1);
-                        out << vertices->val[0] << "," << vertices->val[1] << "," << "0," << endl;
-                    }  
-                }
-
-                if(vertices_nrm_obj.size())
-                {
-                    if(face->vert_n[0]==-1)
-                    {
-                        out << "0,0,0,"<< endl;   
-                    }
-                    else
-                    {
-                        vertices = vertices_nrm_obj.at(face->vert_n[index]-1);
-                        out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;      
-                    }
-                }
-
-                {
-                    /*Add diffuse color*/
-                    out << "1,0,0,"<< endl;    
-                }
-            }
-        }
-        out << "};" << endl;
-#if 0 
-        if(vertices_obj.size())
-        {
-            out << "static float vertices[]={" << endl;
-            for(auto face : pair.second)
-            {
-                /*Get each vertex per face*/
-                for(int index=0; index < face->vert_size; index++)
-                {
-                    vertices = vertices_obj.at(face->vert_[index]-1);
-                    out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-                }
-            }
-            out << "};" << endl;
-        }
-
-        if(vertices_nrm_obj.size())
-        {
-            out << "static float normals[]={" << endl;
-            for(auto face : pair.second)
-            {
-                /*Get each normals per face*/
-                for(int index=0; index < face->vert_size; index++)
-                {
-                    vertices = vertices_nrm_obj.at(face->vert_n[index]-1);
-                    out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;   
-                }
-            }
-            out << "};" << endl;
-        }
-  
-        if(vertices_txt_obj.size())
-        {
-            out << "static float textures[]={" << endl;
-            for(auto face : pair.second)
-            {
-                /*Get each textures per face*/
-                for(int index=0; index < face->vert_size; index++)
-                {
-                    vertices = vertices_txt_obj.at(face->vert_t[index]-1);
-                    out << vertices->val[0] << "," << vertices->val[1] << "," << endl;   
-                }
-            }
-            out << "};" << endl;
-        }
-#endif
-        out << "static float indices[]={" << endl;
-        int triangles=0;
-        for(auto face : pair.second)
-        {
-            n=1; 
-            for(int index = 2; index <  face->vert_size; index++)
-            {
-                ++triangles;
-                //out << face->vert_[tmp]-1-offset <<", " << face->vert_[tmp+n]-1-offset << ", " << face->vert_[tmp+n+1]-1-offset << ", ";   
-                //out << tmp <<", " << tmp+n << ", " << tmp+n+1 << ", ";   
-                out << tmp <<", " << tmp+(index-1) << ", " << tmp+index << ", ";   
-                n++;
-            }
-            tmp += face->vert_size;
-            out << endl;
-        }
-        out << "};" << endl;
-
-        out << "/*** End of Obj - "<< pair.first.second->name << "[ " <<pair.first.first << " ] " << \
-                "[ TRIANGLES : "<< triangles << " ]" <<" ***/" << endl;
-        offset = pair.first.second->vert_size;
-        // printf("offset: %d\r\n", offset);
-    }
-    // out << "int get_vert_size()\n{\nreturn sizeof(vert)/sizeof(vert[0]);\n}" << endl;
-    // out << "float * get_vert()\n{\nreturn vert;\n}" << endl;
-    out.close();
-}
-
-void print()
-{
-    ofstream out;
-
-    out.open("obj_info.c");
-
-    if(!out.is_open())
-    {
-        return;
-    }
-    out << "#include <stddef.h>" << endl;
-    out << "static float vert[]={" << endl;
-#if 1    
-    vert* vertices;
-    int n=0;
-    for(auto pair: object_list)
-    {
-        out << "{\r\n" << endl;
-        for (auto face: pair.second)
-        {
-            n=1; 
-            for(int index = 0; index <  face->vert_size/2; index++)
-            {
-                if(vertices_obj.size())
-                {
-                    vertices = vertices_obj.at(face->vert_[0]-1);
-                    out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-                }
-                if(vertices_txt_obj.size())
-                {
-                    if(face->vert_t[0]!=-1)
-                    {
-
-                        vertices = vertices_txt_obj.at(face->vert_t[0]-1);
-                        out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-                    }
-                    else
-                    {
-                        out << "0,0,0,"<< endl;   
-                    }
-                }
-                if(vertices_nrm_obj.size())
-                {
-                    if(face->vert_n[0]!=-1)
-                    {
-                        vertices = vertices_nrm_obj.at(face->vert_n[0]-1);
-                        out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-                    }
-                    else
-                    {
-                        out << "0,0,0,"<< endl;   
-                    }
-                }
-                // printf("%d, %d\r\n", __LINE__, n);
-                { // n
-                    if(vertices_obj.size())
-                    {
-                        vertices = vertices_obj.at(face->vert_[n]-1);
-                        out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-                    }
-                    if(vertices_txt_obj.size())
-                    {
-                        if(face->vert_t[n]!=-1)
-                        {
-                            vertices = vertices_txt_obj.at(face->vert_t[n]-1);
-                            out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-                        }
-                        else
-                        {
-                            out << "0,0,0,"<< endl;   
-                        }
-                    }
-                    if(vertices_nrm_obj.size())
-                    {
-                        if(face->vert_n[n]!=-1)
-                        {
-                            vertices = vertices_nrm_obj.at(face->vert_n[n]-1);
-                            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-                        }
-                        else
-                        {
-                            out << "0,0,0,"<< endl;   
-                        }
-                    }
-
-                    if(vertices_obj.size())
-                    {
-                        vertices = vertices_obj.at(face->vert_[n+1]-1);
-                        out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-                    }
-                    if(vertices_txt_obj.size())
-                    {
-                        if(face->vert_t[n+1]!=-1)
-                        {
-                            vertices = vertices_txt_obj.at(face->vert_t[n+1]-1);
-                            out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-                        }
-                        else
-                        {
-                            out << "0,0,0,"<< endl;   
-                        }
-                    }
-                    if(vertices_nrm_obj.size())
-                    {
-                        if(face->vert_n[n+1]!=-1)
-                        {
-                            vertices = vertices_nrm_obj.at(face->vert_n[n+1]-1);
-                            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-                        }
-                        else
-                        {
-                            out << "0,0,0,"<< endl;   
-                        }
-                    }         
-                        
-        
-                }
-                n++;
-                // printf("%d, %d\r\n", __LINE__, n);
-            }
-        }
-        out << "}," << endl;
-    }
-#else   
-    for (auto face: faces)
-    {
-        vert* vertices;
-
-        std::cout << __LINE__ << std::endl;
-
-        if(vertices_obj.size())
-        {
-            std::cout << face->vert_[0]-1 << " " << __LINE__ << std::endl;
-            vertices = vertices_obj.at(face->vert_[0]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-        }
-        if(vertices_txt_obj.size())
-        {
-            vertices = vertices_txt_obj.at(face->vert_t[0]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-        }
-        if(vertices_nrm_obj.size())
-        {
-            vertices = vertices_nrm_obj.at(face->vert_n[0]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-        }
-
-        std::cout << __LINE__ << std::endl;
-
-        if(vertices_obj.size())
-        {
-            vertices = vertices_obj.at(face->vert_[1]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-        }
-        if(vertices_txt_obj.size())
-        {
-            vertices = vertices_txt_obj.at(face->vert_t[1]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-        }
-        if(vertices_nrm_obj.size())
-        {
-            vertices = vertices_nrm_obj.at(face->vert_n[1]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-        }
-        if(vertices_obj.size())
-        {
-            vertices = vertices_obj.at(face->vert_[2]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-        }
-        if(vertices_txt_obj.size())
-        {
-            vertices = vertices_txt_obj.at(face->vert_t[2]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-        }
-        if(vertices_nrm_obj.size())
-        {
-            vertices = vertices_nrm_obj.at(face->vert_n[2]-1);
-            out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-        }
-
-        std::cout << __LINE__ << std::endl;
-        
-        if(face->vert_[3] != -1)
-        {
-
-            if(vertices_obj.size())
-            {
-                vertices = vertices_obj.at(face->vert_[0]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-            }
-            if(vertices_txt_obj.size())
-            {
-                vertices = vertices_txt_obj.at(face->vert_t[0]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-            }
-            if(vertices_nrm_obj.size())
-            {
-                vertices = vertices_nrm_obj.at(face->vert_n[0]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-            }
-
-            if(vertices_obj.size())
-            {
-                vertices = vertices_obj.at(face->vert_[2]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-            }
-            if(vertices_txt_obj.size())
-            {
-                vertices = vertices_txt_obj.at(face->vert_t[2]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-            }
-            if(vertices_nrm_obj.size())
-            {
-                vertices = vertices_nrm_obj.at(face->vert_n[2]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;
-            }
-
-            if(vertices_obj.size())
-            {
-                vertices = vertices_obj.at(face->vert_[3]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << "1,"<< endl;   
-            }
-            if(vertices_txt_obj.size())
-            {
-                vertices = vertices_txt_obj.at(face->vert_t[3]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << "0,"<< endl;   
-            }
-            if(vertices_nrm_obj.size())
-            {
-                vertices = vertices_nrm_obj.at(face->vert_n[3]-1);
-                out << vertices->val[0] << "," << vertices->val[1] << "," << vertices->val[2] << "," << endl;   
-            }
-        }
-        std::cout << __LINE__ << std::endl;
-        //cout << "Vert: " << face->vert_[0] << "," << face->vert_[1] << "," << face->vert_[2] << "," << face->vert_[3]<< endl;
-        //cout << "vert_n: " << face->vert_n[0] << "," << face->vert_n[1] << "," << face->vert_n[2] << "," << face->vert_n[3]<< endl;
-        //cout << "vert_t: " << face->vert_t[0] << "," << face->vert_t[1] << "," << face->vert_t[2] << "," << face->vert_t[3]<< endl;
-    }
-#endif    
-    //cout << endl;
-    out << "};" << endl;
-    out << "int get_vert_size()\n{\nreturn sizeof(vert)/sizeof(vert[0]);\n}" << endl;
-    out << "float * get_vert()\n{\nreturn vert;\n}" << endl;
-    out.close();
-
-}
-
-#if 0
-void print_faces()
-{
-    ofstream out;
-
-    out.open("obj_info.c", ios_base::app);
-
-    if(!out.is_open())
-    {
-        return;
-    }
-
-    out << "int indices[]={" << endl;
-    for (auto face: faces)
-    {
-        //cout << "Vert: " << face->vert_[0] << "," << face->vert_[1] << "," << face->vert_[2] << "," << face->vert_[3]<< endl;
-        //cout << "vert_n: " << face->vert_n[0] << "," << face->vert_n[1] << "," << face->vert_n[2] << "," << face->vert_n[3]<< endl;
-        //cout << "vert_t: " << face->vert_t[0] << "," << face->vert_t[1] << "," << face->vert_t[2] << "," << face->vert_t[3]<< endl;
-        out << face->vert_[0]-1 << "," << face->vert_[1]-1 << "," << face->vert_[2]-1 << ",";
-        if(face->vert_[3] != -1)
-            out << face->vert_[0]-1 << "," << face->vert_[2]-1 << "," << face->vert_[3]-1 << ","; 
-        out << endl;
-    }
-
-    //cout << endl;
-    out << "};" << endl;
-    out.close();
-}
-
-void print_vertices()
-{
-    ofstream out;
-
-    out.open("obj_info.c");
-
-    if(!out.is_open())
-    {
-        return;
-    }
-
-    out << "float vertices[]={" << endl; 
-    for (auto vertex: vertices_obj)
-    {
-       // cout << vertex->val[0] << "," << vertex->val[1] << "," << vertex->val[2] << "," << endl;
-        out << vertex->val[0] << "," << vertex->val[1] << "," << vertex->val[2] << "," << endl;
-    }
-    out << "};" << endl; 
-
-    out << "float normals[]={" << endl; 
-    for (auto vertex: vertices_nrm_obj)
-    {
-       // cout << vertex->val[0] << "," << vertex->val[1] << "," << vertex->val[2] << "," << endl;
-        out << vertex->val[0] << "," << vertex->val[1] << "," << vertex->val[2] << "," << endl;
-    }
-    out << "};" << endl; 
-
-    out << "float texture[]={" << endl; 
-    for (auto vertex: vertices_txt_obj)
-    {
-      //  cout << vertex->val[0] << "," << vertex->val[1] << "," << vertex->val[2] << "," << endl;
-        out << vertex->val[0] << "," << vertex->val[1] << "," << endl;
-    }
-    out << "};" << endl; 
-    out.close();
-}
-#endif
 
 int parse_indices(std::string& line)
 {
@@ -854,19 +718,6 @@ int parse_indices(std::string& line)
     }
     return 0;
 }
-int parser_init()
-{
-    memset(&dimension, 0, sizeof(dimension));
-    init_dim_x= 0;
-    init_dim_y= 0;
-    init_dim_z= 0;
-    line_num = 0;
-    found=0;
-    object_index=-1;
-    vert_size=0;
-    t_dim = nullptr;
-    return 0;
-}
 
 int update_obj_list()
 {
@@ -887,21 +738,121 @@ int update_obj_list()
     return 0;
 }
 
-int parse_line(string line)
+int update_stride()
 {
-    line_num++;
-    //std::cout << "LINE NUM " <<  line_num << std::endl;
-//    LOGE("Line: %s\n", line.c_str());
-    if(!line.size())
+    stride =0;
+    if(vertices_obj.size())
+        stride += 4;
+    if(vertices_txt_obj.size())
+        stride += 3;
+    if(vertices_nrm_obj.size())
+        stride += 3;
+
+    stride += 3;
+    return stride;
+}
+
+int update_obj(string line, string specifier)
+{
+   // printf(":%d, %s\r\n", __LINE__, specifier);
+    found = line.find(specifier);
+    if(found != string::npos)
     {
+        //expect a space near specifier
+        if(line.at(found+1) != ' ')
+            return 0;
+
         if(object_index!= -1)
         {
             update_obj_list();
         }
-        //std::cout << "empty" << std::endl;
-        LOGE("File is EMPTY\n");
+
+        obj_name = line.substr(found+2);
+        object_index++;
         return 0;
     }
+    return 0;
+}
+
+int update_faces(string line, string specifier)
+{
+    found = line.find(specifier);
+    if(found != string::npos)
+    {
+        parse_indices(line);
+        return 0;//continue;
+    }
+    return 0;
+}
+
+int update_vertices(string line)
+{
+    char ch;
+    switch (ch = line.at(1))
+    {
+        case 't':/*textures*/
+            found = line.find("vt");
+            if(found != string::npos)
+            {
+                parse_vertices(line ,"vt");
+                return 0;//continue;;
+            }
+            break;
+        case 'n':/*normals*/
+            found = line.find("vn");
+            if(found != string::npos)
+            {
+                parse_vertices(line ,"vn");
+                return 0;//continue;;
+            }
+            break;
+        case ' ':/*vertices*/
+            found = line.find("v");
+            if(found != string::npos)
+            {
+                if(line.at(found+1) == ' ')
+                {
+                    ++vert_size;
+                    parse_vertices(line ,"v");
+                    return 0;//continue;;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+int parse_line(string line)
+{
+    char ch;
+    line_num++;
+    //std::cout << "LINE NUM " <<  line_num << std::endl;
+//    LOGE("Line: %s\n", line.c_str());
+    if(line.size() == 0)
+    {
+        return 0;
+    }
+
+    // cout << line.at(0) << std::endl;
+    switch (ch = line.at(0))
+    {
+        case 'o':
+        case 'g':
+            update_obj(line, string(1, ch));
+            break;
+        case 'f':
+            update_faces(line, string(1, ch));
+            break;
+        case 'v':
+            update_vertices(line);
+            break;
+        default:
+            break;
+    }
+
+#if 0
 
     found = line.find("o");
     if(found != string::npos)
@@ -952,73 +903,51 @@ int parse_line(string line)
             return 0;//continue;;
         }
     }
+#endif
     return 0;
 }
 
 int parse(ifstream& in_file)
 {
-    //stringstream ctx(str_file);
-#if 0    
-    size_t found = ctx.find("f");
-    while(found != string::npos)
-    {
-        cout << found << endl;
-        found = ctx.find("f", found+1);
-        for(std::string::iterator it = ctx.)
-        {
-
-        }
-        face *n_face = new face;
-        n_face->a = 
-    }
-#endif
     std::string line;
     while(!in_file.eof())
     {
         getline(in_file, line);
         parse_line(line);
     }
+    update_obj_list();
+    update_stride();
     return 0;
 }
 
-void parseObj(const char* fileName)
-{
-    ifstream inFile;
-    stringstream str_test;
-
-    //inFile.open(fileName);
-    FILE *file = fopen(fileName, "rb");
-    if(file == NULL)
-    {
-        LOGE("Cannot read file '%s'\n", fileName);
-    }
-    else{
-        LOGE("file read successfully '%s'\n", fileName);
-    }
-    /*
-    if(inFile.is_open())
-    {
-        std::string temp;
-        parse(inFile);
-        //print_s();
-        LOGE("File open, %s", fileName);
-    }
-    else
-    {
-        std::cout << "Invalid FILE" << endl;
-        LOGE("File open, %s cannt open", fileName);
-    }
-
-    inFile.close();
-     */
-//    return 0;
-}
 
 int prepare_vertices()
 {
     update_obj_list();
+    update_stride();
+
     update_vertices();
-    update_indices();
+    //update_indices();
+    return 0;
+}
+
+int parser_init()
+{
+    memset(&dimension, 0, sizeof(dimension));
+    init_dim_x= 0;
+    init_dim_y= 0;
+    init_dim_z= 0;
+    line_num = 0;
+    found=0;
+    object_index=-1;
+    vert_size=0;
+    stride=0;
+    vertices_obj.clear();
+    vertices_nrm_obj.clear();
+    vertices_txt_obj.clear();
+    object_list.clear();
+    t_dim = nullptr;
+    objList = nullptr;
     return 0;
 }
 #if 0
@@ -1043,24 +972,13 @@ int main(int argc, char** argv)
     if(inFile.is_open())
     {
         std::string temp;
-        // while(!inFile.eof())
-        // {
-        //     getline(inFile, temp);
-        //     temp.append("\n");
-        //     str_test << temp;
-        // }
         parse(inFile);
-        // parse_vertices(inFile, "v");
-        // parse_vertices(inFile, "vn");
-        // parse_vertices(inFile, "vt");
-        //print_vertices();
-        //print_faces();
-        print_s();
-        //cout << str_test.str();
+        print_to_obj_c();
+
     }
     else
     {
-        std::cout << "Invalid FILE" << endl;    
+        std::cout << "Invalid FILE" << endl;
     }
     inFile.close();
 
@@ -1072,8 +990,8 @@ int main(int argc, char** argv)
 extern "C"{
     JNIEXPORT void JNICALL
     Java_com_ahmed_fun_1gl_NativeLib_parse(JNIEnv *env, jclass clazz, jstring fileName) {
-        jboolean copyBytes;
-        parseObj(env->GetStringUTFChars(fileName, &copyBytes));
+    jboolean copyBytes;
+    //parseObj(env->GetStringUTFChars(fileName, &copyBytes));
     }
 
     JNIEXPORT void JNICALL
@@ -1083,7 +1001,7 @@ extern "C"{
 
     JNIEXPORT void JNICALL
     Java_com_ahmed_fun_1gl_NativeLib_parseLine(JNIEnv *env, jclass clazz, jstring line) {
-        jboolean copyBytes;
+    jboolean copyBytes;
         parse_line(env->GetStringUTFChars(line, &copyBytes));
     }
 

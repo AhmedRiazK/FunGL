@@ -8,6 +8,8 @@
 #include "shader.h"
 #include "matrix.h"
 
+#include <iostream>
+
 std::string resourceDirectory = "/data/data/com.ahmed.fun_gl/";
 std::string vertexShaderFileName = "mesh.vert";
 std::string fragmentShaderFileName = "mesh.frag";
@@ -108,12 +110,25 @@ float angle = 0;
 
 AAssetManager* asset_manager = nullptr;
 
+extern int get_indices_size();
 extern float* get_indices();
 extern unsigned short* get_vertices();
+extern int get_stride_size();
+extern ObjectList* get_objects_info();
+
+extern float get_scene_width();
+extern float get_scene_height();
+extern float get_scene_depth();
+
+float camera_dist_z;
+float camera_dist_y;
+float camera_dist_x;
 
 /* [setupGraphics] */
 bool setupGraphics(int width, int height)
 {
+    float temp = 0;
+
     /*Shader path*/
 #if 0
     const std::string vShaderFileName = resourceDirectory+vertexShaderFileName;
@@ -148,8 +163,26 @@ bool setupGraphics(int width, int height)
     modelViewLocation = glGetUniformLocation(meshProgram, "modelView");
 
     /* Setup the perspective */
-    matrixPerspective(projectionMatrix, 45, (float)width / (float)height, 0.1f, 100);
+    float z_near = 0.1f;
+    float z_far = sqrt(((temp * 2) * (temp * 2)) + ((temp * 2) * (temp * 2)));
+    matrixPerspective(projectionMatrix, 60, (float)width / (float)height, z_near, z_far);
     glEnable(GL_DEPTH_TEST);
+
+    if (get_scene_width() > get_scene_height())
+    {
+        temp = get_scene_width();
+    }
+    else
+    {
+        temp = get_scene_height();
+    }
+
+    if (temp < get_scene_depth())
+    {
+        temp = get_scene_depth();
+    }
+
+    camera_dist_y = camera_dist_z = (temp + temp / 2);
 
     glViewport(0, 0, width, height);
 
@@ -161,27 +194,44 @@ bool setupGraphics(int width, int height)
 /* [renderFrame] */
 void renderFrame()
 {
-    float* ptr_vertices= reinterpret_cast<float *>(get_vertices());
+    std::cout << __LINE__ << std::endl;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
+    std::cout << __LINE__ << std::endl;
     matrixIdentityFunction(modelViewMatrix);
-
+    std::cout << __LINE__ << std::endl;
     matrixRotateX(modelViewMatrix, angle);
     matrixRotateY(modelViewMatrix, angle);
-
+    std::cout << __LINE__ << std::endl;
     matrixTranslate(modelViewMatrix, 0.0f, 0.0f, -10.0f);
+    mat4LookAt(modelViewMatrix, camera_dist_x, camera_dist_y, camera_dist_z, \
+             /*lookat position*/0.0f, get_scene_height()/2, get_scene_depth() / 2, \
+                                0.0f, 1.0f, 0.0f);
 
     glUseProgram(meshProgram);
-    glVertexAttribPointer(vertexLocation, 3, GL_FLOAT, GL_FALSE, 13* sizeof(float), ptr_vertices);
-    glEnableVertexAttribArray(vertexLocation);
-    glVertexAttribPointer(vertexColourLocation, 3, GL_FLOAT, GL_FALSE, 13* sizeof(float), (ptr_vertices+10));
-    glEnableVertexAttribArray(vertexColourLocation);
 
-    glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, projectionMatrix);
-    glUniformMatrix4fv(modelViewLocation, 1, GL_FALSE, modelViewMatrix);
-
-    glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_SHORT, get_indices());
+    ObjectList* list = get_objects_info();
+    while(list)
+    {
+        std::cout << __LINE__ << std::endl;
+        float* ptr_vertices =  list->obj_data->vertices_info.data();
+        glVertexAttribPointer(vertexLocation, 3, GL_FLOAT, GL_FALSE, \
+                        list->obj_data->stride * sizeof(float), ptr_vertices);
+        glEnableVertexAttribArray(vertexLocation);
+        std::cout << __LINE__ << std::endl;
+        glVertexAttribPointer(vertexColourLocation, 3, GL_FLOAT, GL_FALSE,\
+                        list->obj_data->stride * sizeof(float), \
+                        (ptr_vertices+ (list->obj_data->stride - 3)));
+        glEnableVertexAttribArray(vertexColourLocation);
+        std::cout << __LINE__ << std::endl;
+        glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, projectionMatrix);
+        glUniformMatrix4fv(modelViewLocation, 1, GL_FALSE, modelViewMatrix);
+        std::cout << __LINE__ << std::endl;
+        glDrawElements(GL_TRIANGLES, list->obj_data->indices_size, GL_UNSIGNED_SHORT, list->obj_data->indices_info.data());
+        std::cout << __LINE__ << std::endl;
+        list = list->next;
+        std::cout << __LINE__ << std::endl;
+    }
 
     angle += 1;
     if (angle > 360)

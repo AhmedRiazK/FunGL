@@ -165,3 +165,65 @@ float matrixDegreesToRadians(float degrees)
 {
     return M_PI * degrees / 180.0f;
 }
+
+float vec3Dot(float* a, float* b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+void vec3Cross(float* a, float* b, float* res) {
+    res[0] = a[1] * b[2] - b[1] * a[2];
+    res[1] = a[2] * b[0] - b[2] * a[0];
+    res[2] = a[0] * b[1] - b[0] * a[1];
+}
+
+void vec3Normalize(float* a) {
+    float mag = sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    a[0] /= mag; a[1] /= mag; a[2] /= mag;
+}
+
+void  mat4LookAt(float* matrix,
+                 float eyeX, float eyeY, float eyeZ,
+                 float centerX, float centerY, float centerZ,
+                 float upX, float upY, float upZ) {
+
+    float viewMatrix[16];
+    matrixIdentityFunction(viewMatrix);
+
+    float dir[3];
+    float right[3];
+    float up[3];
+    float eye[3];
+
+    up[0] = upX; up[1] = upY; up[2] = upZ;
+    eye[0] = eyeX; eye[1] = eyeY; eye[2] = eyeZ;
+
+    dir[0] = centerX - eyeX; dir[1] = centerY - eyeY; dir[2] = centerZ - eyeZ;
+    vec3Normalize(dir);
+    vec3Cross(dir, up, right);
+    vec3Normalize(right);
+    vec3Cross(right, dir, up);
+    vec3Normalize(up);
+    // first row
+    viewMatrix[0] = right[0];
+    viewMatrix[4] = right[1];
+    viewMatrix[8] = right[2];
+    viewMatrix[12] = -vec3Dot(right, eye);
+    // second row
+    viewMatrix[1] = up[0];
+    viewMatrix[5] = up[1];
+    viewMatrix[9] = up[2];
+    viewMatrix[13] = -vec3Dot(up, eye);
+    // third row
+    viewMatrix[2] = -dir[0];
+    viewMatrix[6] = -dir[1];
+    viewMatrix[10] = -dir[2];
+    viewMatrix[14] = vec3Dot(dir, eye);
+    // forth row
+    viewMatrix[3] = 0.0;
+    viewMatrix[7] = 0.0;
+    viewMatrix[11] = 0.0;
+    viewMatrix[15] = 1.0;
+
+    matrixMultiply(matrix, viewMatrix, matrix);
+
+}
